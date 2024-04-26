@@ -2,7 +2,8 @@ from flask import Flask
 from flask import jsonify
 from flask import request
 from flask_cors import CORS
-import psycopg2
+import psycopg2 
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import List
@@ -32,56 +33,61 @@ conn = create_connection()
 
 app = Flask(__name__) 
 CORS(app)
-
-@app.route('/compare_power', methods=['GET'])
-def compare_power():
-    hero_id1 = request.args.get('hero_id1')
-    hero_id2 = request.args.get('hero_id2')
-
-    if not hero_id1 or not hero_id2:
-        return jsonify({"error": "Both hero_id1 and hero_id2 parameters are required"}), 400
-
-    conn = psycopg2.connect(**DB_PARAMS)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT h1.hero_name AS hero_name1, SUM(p1.power_level) AS total_power1,
-           h2.hero_name AS hero_name2, SUM(p2.power_level) AS total_power2
-        FROM heroes AS h1
-        JOIN heroes_powers AS hp1 ON h1.hero_id = hp1.hero_id
-        JOIN powers AS p1 ON hp1.power_id = p1.power_id
-        JOIN heroes AS h2 ON h2.hero_id = ?
-        JOIN heroes_powers AS hp2 ON h2.hero_id = hp2.hero_id
-        JOIN powers AS p2 ON hp2.power_id = p2.power_id
-        WHERE h1.hero_id = ? AND h2.hero_id = ?
-    """, (hero_id2, hero_id1, hero_id2))
-
-    result = cursor.fetchone()
-    conn.close()
-
-    if result is None:
-        return jsonify({"error": "One or both heroes not found"}), 404
-
-    hero_name1, total_power1, hero_name2, total_power2 = result
-    if total_power1 > total_power2:
-        winner = hero_name1
-    elif total_power1 < total_power2:
-        winner = hero_name2
-    else:
-        winner = "Tie"
-
-    response = {
-        "hero_id1": hero_id1,
-        "hero_name1": hero_name1,
-        "total_power1": total_power1,
-        "hero_id2": hero_id2,
-        "hero_name2": hero_name2,
-        "total_power2": total_power2,
-        "winner": winner,
-    }
-
-    return jsonify(response)
+@dataclass
+class Power:
+    """Class to represent a power."""
+    power_name: str
+    power_level: int = 0
+    power_type: str = None
+    power_id: int = None
     
+    def to_dictionary(self):
+        """Returns a dictionary representation of the power"""
+        return asdict(self)
+@dataclass
+class Hero:
+    """Class to represent a hero."""
+    hero_name: str
+    gender: str = None
+    eye_color: str = None
+    species: str = None
+    hair_color: str = None
+    height: float = None
+    weight: float = None
+    publisher: str = None
+    skin_color: str = None
+    alignment: str = None
+    hero_id: int = None
+    powers: List[Power] = field(default_factory=list)
+    
+    def to_dictionary(self, include_powers=False):
+        """Returns a dictionary representation of the hero"""
+        hero_dict = asdict(self)
+        if not include_powers:
+            hero_dict.pop('powers')
+        else:
+            hero_dict['powers'] = [power.to_dictionary() for power in self.powers]
+        return hero_dict   
+
+@app.route('/heroes', methods=['GET'])
+def get_heroes():
+    print("Success")
+    limit = request.args.get('limit', 10)
+
+    heroes = select_all_heroes(limit)
+    return jsonify([hero.to_dictionary() for hero in heroes])
+
+def select_all_heroes(limit):
+    
+    conn = psycopg2.connect(**DB_PARAMS)
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM heroes LIMIT %s', (limit,))
+    results = cur.fetchall()
+    heroes = []
+    for result in results:
+        hero = Hero(result[1], result[2], result[3], result[4], result[5], result[6], result[7], result[8], result[9], result[10], result[0])
+        heroes.append(hero)
+    return heroes
 ###
 # Main
 ###
